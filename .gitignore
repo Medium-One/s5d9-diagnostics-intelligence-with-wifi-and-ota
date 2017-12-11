@@ -1,0 +1,8 @@
+.module_descriptions
+Debug/
+synergy_cfg.txt
+userpackexportsettings.xml
+src/synergy_gen/
+synergy/
+synergy_cfg/
+
