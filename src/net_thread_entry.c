@@ -605,12 +605,12 @@ void net_thread_entry(void)
                             5,
                             1000,
 #ifdef USE_TLS
+                            1,
                             diag_ssl_mem,
                             DIAG_SSL_MEM_SIZE,
-                            1,
 #else
-                            NULL,
                             0,
+                            NULL,
                             0,
 #endif
                             &g_http_packet_pool,
