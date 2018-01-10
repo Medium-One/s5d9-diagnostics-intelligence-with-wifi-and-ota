@@ -42,15 +42,6 @@
 #define PROVISIONED_FLAG 1
 
 
-typedef struct {
-    user_credentials_t device;
-    user_credentials_t registration;
-#ifdef USE_M1DIAG
-    user_credentials_t diagnostics;
-#endif
-    project_credentials_t project;
-} app_config_t;
-
 extern NX_IP g_http_ip;
 extern NX_DNS g_dns_client;
 
@@ -77,6 +68,8 @@ volatile agg_t g_pressure = { .name = "pressure", .total = 0, .min = 0, .max = 0
 volatile agg_t g_mic = { .name = "mic", .total = 0, .min = 0, .max = 0, .count = 0, .last_sent = 0, .value = 0, .threshold = 0, .absolute_threshold = 0, .last_sent_tick = 0 };
 volatile agg_t g_voice_fft = { .name = "voice_fft", .total = 0, .min = 0, .max = 0, .count = 0, .last_sent = 0, .value = 0, .threshold = 0, .absolute_threshold = 0, .last_sent_tick = 0 };
 volatile uint32_t g_x_zero_crossings = 0, g_y_zero_crossings = 0, g_z_zero_crossings = 0;
+
+app_config_t app_config;
 
 #ifdef USE_M1DIAG
 /*
