@@ -32,6 +32,8 @@
 
 
 /*
+ * ***DEPRECATED***: This API will be removed in a future version.
+ * Use m1_auto_enroll_connect_2 instead.
  * Description:
  * 		Establishes a MQTT connection to Medium One using the provided credentials. If device::user_id
  * 		has a non-zero length, device credentials are used when attempting to connect to the Medium One
@@ -90,6 +92,7 @@
  * Success:
  * 		return 0
  */
+__attribute__((__deprecated__))
 int m1_auto_enroll_connect(const char * mqtt_url,
 			 			   	int mqtt_port,
 			                const project_credentials_t * project,
@@ -105,74 +108,8 @@ int m1_auto_enroll_connect(const char * mqtt_url,
 			                NX_PACKET_POOL * p_ppool,
 			                NX_IP * p_ip,
 			                NX_DNS * p_dns);
-int m1_auto_enroll_connect_2(m1_connect_params * params);
 
-/*
- *
- * ***DEPRECATED***: This API will be removed in a future version.
- * Use m1_auto_enroll_connect instead.
- * This API dynamically allocates ~30k from the heap. Please make sure your heap
- * is sized large enough to accomodate this.
- *
- * Description:
- *      Establishes a MQTT connection to Medium One using the provided credentials.
- * 		A dedicated M1 agent thread is created, if it does not already exist. During m1_connect(),
- * 		if connection is successful, the following data is transmitted to
- * 		the Medium One "raw" datastream:
- * 			“connected”: true
- * 			"ip_address": <WAN_IP>
- * 			"unique_id": <Unique ID> (from FMI)
- * 			"product_name": <Product Name> (from FMI)
- * 			"product_market": <Product Marking> (from FMI)
- * 			"mask_revision": <Mask Revision> (from FMI)
- * 			"quality_code": <Quality Code> (from FMI)
- * 			"ssp_version": <SSP Version> (ssp_version_t) (from FMI)
- * 			"mac_address": <mac address> (if available) (from NetX)
- * 			"lan_address": <lan_address> (if available) (from NetX)
- * 		Finally a subscription is made to the Medium One subscription topics for the specified user.
- * 		The dedicated agent thread maintains and monitors the MQTT connection. If the connection drops,
- * 		the agent will continuously try to reconnect, with a delay of 5 seconds between attempts.
- * 		This is a blocking call.
- * Parameters:
- * 		mqtt_url: 		MQTT broker
- * 		mqtt_port: 		MQTT port
- *		mqtt_user_id: 	MQTT user ID (provided by docs)
- *		password: 		API user password
- *		mqtt_project_id:MQTT project ID (provided by docs)
- *		api_key:		API key
- * 		device: 		MQTT user ID and password for API basic user
- * 		device_id:		device identifier, maximum 60 characters
- * 		retry_limit: 	The number of times to retry (recommend 5 times)
- * 		retry_delay: 	The time delay (seconds) between retry (recommend 5 seconds)
- * 		mqtt_heart_beat:period (seconds) between MQTT ping (recommended 300 seconds)
- * 		tls_enabled: 	1 to use TLS
- *		p_ppool:		pointer to NX_PACKET_POOL instance to use
- *		p_ip:			pointer to NX_IP instance to use
- *		p_dns:			pointer to NX_DNS instance to use
- * Errors:
- * 		M1_ERROR_INVALID_URL -			must end with "mediumone.com"
- * 		M1_ERROR_UNABLE_TO_CONNECT - 	returned if a fatal error occurs. fatal errors include:
- *									 		- Network unavailable
- *									 		- Incorrect MQTT broker URL or port
- *									 		- Using TLS with non-TLS port, or vice-versa
- *		M1_ERROR_ALREADY_CONNECTED -	returned if already connected
- *		M1_ERROR_BAD_CREDENTIALS - 		returned if any of mqtt_user_id, password, mqtt_project_id, or api_key are incorrect
- *
- * Success:
- * 		return 0
- */
-__attribute__((__deprecated__))
-int m1_connect(const char * mqtt_url,
-				int mqtt_port,
-				char * mqtt_user_id,
-				char * password,
-				char * mqtt_project_id,
-				char * api_key,
-				const char * device_id,
-				int retry_limit,
-				int retry_delay,
-				int mqtt_heart_beat,
-				int tls_enabled);
+int m1_auto_enroll_connect_2(m1_connect_params * params);
 
 /*
  * Description:

@@ -70,7 +70,7 @@ typedef struct {
 	} accessor;
 } periphery_access_t;
 
-
+__attribute__((__deprecated__))
 int m1_diag_start(const char * mqtt_url,
                     int mqtt_port,
                     const project_credentials_t * project,
