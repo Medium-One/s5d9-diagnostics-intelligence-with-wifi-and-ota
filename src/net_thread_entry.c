@@ -503,13 +503,11 @@ void net_thread_entry(void)
     ssp_err_t status = SSP_SUCCESS;
     int ret = 0;
     char buf[400];
-    int provisioned = 0;
     fmi_product_info_t * effmi;
     app_config_t provisioned_config;
     user_credentials_t original_device;
     original_device.user_id[0] = '\0';
     original_device.password[0] = '\0';
-    memset(&app_config, 0, sizeof(app_config));
     memset(&provisioned_config, 0, sizeof(provisioned_config));
 #ifdef USE_M1DIAG
     const project_credentials_t diag_project = {
@@ -559,13 +557,14 @@ void net_thread_entry(void)
         memcpy(&provisioned_config, cfg_from_flash, sizeof(provisioned_config));
         if (strlen(app_config.project.apikey))
             memcpy(&cfg_from_flash->project, &app_config.project, sizeof(cfg_from_flash->project));
+        if (strlen(app_config.device.password))
+            memcpy(&cfg_from_flash->device, &app_config.device, sizeof(cfg_from_flash->device));
         if (strlen(app_config.registration.password))
             memcpy(&cfg_from_flash->registration, &app_config.registration, sizeof(cfg_from_flash->registration));
         memcpy(&app_config, cfg_from_flash, sizeof(app_config));
 #ifdef USE_M1DIAG
         memcpy(&original_diag_device, &app_config.diagnostics, sizeof(original_diag_device));
 #endif
-        provisioned = 1;
         memcpy(&original_device, &app_config.device, sizeof(original_device));
     }
 
