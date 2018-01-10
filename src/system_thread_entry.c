@@ -44,7 +44,8 @@ char g_link_code[7];
 #define ARP_SIZE 512
 #define LINK_UP_TIMEOUT 500
 #define DHCP_RESOLVE_TIMEOUT 1000
-#define WIFI_ASSOCIATE_TIMEOUT 1000
+#define WIFI_ASSOCIATE_RETRIES 5
+
 
 NX_IP g_http_ip;
 static CHAR mem_ip_stack[IP_STACK_SIZE]  __attribute__ ((aligned(4)));
@@ -185,8 +186,13 @@ int network_setup(FX_MEDIA * pMedia)
     ULONG mac_low;
     char msg[80];
     NX_IP * p_nx_ip_connection = NULL;
+    FILE * fp_file;
+    ioport_level_t wifi_detect;
+    int wifi_associate_retry_counter;
 
 
+    remove("network.log");
+    fp_file = fopen("network.log", "w");
     status = nx_ip_create(&g_http_ip, "HTTP IP Instance",
                           IP_ADDRESS(0,0,0,0), IP_ADDRESS(255, 255, 255, 0),
                           &g_http_packet_pool, nx_ether_driver_eth0,
@@ -194,6 +200,7 @@ int network_setup(FX_MEDIA * pMedia)
     /** Wait for init to finish. ??*/
     status = nx_ip_interface_status_check(&g_http_ip, 0, NX_IP_LINK_ENABLED, &actual_status_bits, 1000);
     if (status == NX_SUCCESS) {
+        cfprint(fp_file, "[ETH] secondary interface link up\r\n");
         status = nx_ip_fragment_enable(&g_http_ip);
 
         status = nx_arp_enable(&g_http_ip, mem_arp, sizeof(mem_arp));
@@ -209,72 +216,102 @@ int network_setup(FX_MEDIA * pMedia)
         status = nx_ip_status_check(&g_http_ip, NX_IP_LINK_ENABLED, &actual_status_bits, LINK_UP_TIMEOUT);
 
         if (status == NX_SUCCESS) {
+            cfprint(fp_file, "[ETH] primary interface link up\r\n");
             // enter ethernet mode
             status = nx_dhcp_create(&g_dhcp, &g_http_ip, "dhcp");
             status = nx_dhcp_start(&g_dhcp);
             status = nx_ip_status_check(&g_http_ip, NX_IP_ADDRESS_RESOLVED, &actual_status_bits, DHCP_RESOLVE_TIMEOUT);
             if (status != NX_SUCCESS) {
+                cfprint(fp_file, "[ETH] couldn't resolve ip address before timeout\r\n");
                 status = nx_dhcp_stop(&g_dhcp);
                 status = nx_dhcp_delete(&g_dhcp);
             } else {
+                cfprint(fp_file, "[ETH] ip address resolved\r\n");
                 p_nx_ip_connection = &g_http_ip;
             }
-        }
+        } else
+            cfprint(fp_file, "[ETH] primary interface link down\r\n");
+    } else
+        cfprint(fp_file, "[ETH] secondary interface link down\r\n");
+
+    if (p_nx_ip_connection == NULL) {
+#define WIFI_DETECT_PIN IOPORT_PORT_07_PIN_08
+        cfprint(fp_file, "[ETH] not connected, checking WiFi\r\n");
+        R_IOPORT_PinCfg(WIFI_DETECT_PIN, (IOPORT_CFG_PORT_DIRECTION_OUTPUT | IOPORT_CFG_PORT_OUTPUT_LOW));
+        tx_thread_sleep(1);
+        R_IOPORT_PinCfg(WIFI_DETECT_PIN, IOPORT_CFG_PORT_DIRECTION_INPUT);
+        tx_thread_sleep(1);
+        R_IOPORT_PinRead(WIFI_DETECT_PIN, &wifi_detect);
+        R_IOPORT_PinCfg(WIFI_DETECT_PIN, IOPORT_CFG_PORT_DIRECTION_INPUT | IOPORT_CFG_IRQ_ENABLE | IOPORT_CFG_PULLUP_ENABLE);
+        tx_thread_sleep(1);
+
+        if (wifi_detect == IOPORT_LEVEL_HIGH) {
+            set_led(2,  1);
+            cfprint(fp_file, "[WiFi] PMOD present\r\n");
+
+            // enter wifi mode
+            status = nx_ip_delete(&g_http_ip);
+            status = nx_ip_create(&g_http_ip, "HTTP IP Instance",
+                                  IP_ADDRESS(0,0,0,0), IP_ADDRESS(255, 255, 255, 0),
+                                  &g_http_packet_pool, g_sf_el_nx0,
+                                  mem_ip_stack, sizeof(mem_ip_stack), 2);
+            /** Wait for init to finish. */
+            status = nx_ip_interface_status_check(&g_http_ip, 0, NX_IP_LINK_ENABLED, &actual_status_bits, 100);
+
+            status = nx_ip_fragment_enable(&g_http_ip);
+
+            status = nx_arp_enable(&g_http_ip, mem_arp, sizeof(mem_arp));
+
+            status = nx_tcp_enable(&g_http_ip);
+
+            status = nx_udp_enable(&g_http_ip);
+
+            status = nx_icmp_enable(&g_http_ip);
+
+            status = nx_ip_status_check(&g_http_ip, NX_IP_LINK_ENABLED, &actual_status_bits, LINK_UP_TIMEOUT);
+            if (status == NX_SUCCESS)
+                cfprint(fp_file, "[WiFi] primary link up\r\n");
+            else
+                cfprint(fp_file, "[WiFi] primary link down\r\n");
+            if ((status == NX_SUCCESS) && !parse_wifi_credentials((char *)prov.ssid, sizeof(prov.ssid), (char *)prov.key, sizeof(prov.key))) {
+                cfprint(fp_file, "[WiFi] configuration read\r\n");
+                prov.mode = SF_WIFI_INTERFACE_MODE_CLIENT;
+                prov.encryption = SF_WIFI_ENCRYPTION_TYPE_AUTO;
+                prov.security = SF_WIFI_SECURITY_TYPE_WPA2;
+                prov.p_callback = wifi_change;
+                for (wifi_associate_retry_counter = 0; wifi_associate_retry_counter < WIFI_ASSOCIATE_RETRIES; wifi_associate_retry_counter++) {
+                    status = g_sf_wifi0.p_api->provisioningSet(g_sf_wifi0.p_ctrl, &prov);
+                    if (status == SSP_SUCCESS)
+                        break;
+                }
+                if (wifi_associate_retry_counter >= WIFI_ASSOCIATE_RETRIES) {
+                    sprintf(msg, "[WiFi] provisioning failed: %lu\r\n", status);
+                    cfprint(fp_file, msg);
+                } else {
+                    cfprint(fp_file, "[WiFi] provisioning completed\r\n");
+                    status = nx_dhcp_create(&g_dhcp, &g_http_ip, "dhcp");
+                    status = nx_dhcp_start(&g_dhcp);
+                    status = nx_ip_status_check(&g_http_ip, NX_IP_ADDRESS_RESOLVED, &actual_status_bits, DHCP_RESOLVE_TIMEOUT);
+                    if (status == NX_SUCCESS) {
+                        p_nx_ip_connection = &g_http_ip;
+                        cfprint(fp_file, "[WiFi] ip address resolved\r\n");
+                    } else
+                        cfprint(fp_file, "[WiFi] couldn't resolve ip address before timeout\r\n");
+                }
+            } else
+                cfprint(fp_file, "[WiFi] configuration parsing failed\r\n");
+        } else
+            cfprint(fp_file, "[WiFi] PMOD not present\r\n");
     }
-    ioport_level_t wifi_detect;
-    R_IOPORT_PinCfg(IOPORT_PORT_07_PIN_08, (IOPORT_CFG_PORT_DIRECTION_OUTPUT | IOPORT_CFG_PORT_OUTPUT_LOW));
-    tx_thread_sleep(1);
-    R_IOPORT_PinCfg(IOPORT_PORT_07_PIN_08, IOPORT_CFG_PORT_DIRECTION_INPUT);
-    tx_thread_sleep(1);
-    R_IOPORT_PinRead(IOPORT_PORT_07_PIN_08, &wifi_detect);
-    R_IOPORT_PinCfg(IOPORT_PORT_07_PIN_08, IOPORT_CFG_PORT_DIRECTION_INPUT | IOPORT_CFG_IRQ_ENABLE | IOPORT_CFG_PULLUP_ENABLE);
 
-    if ((p_nx_ip_connection == NULL) && (wifi_detect == IOPORT_LEVEL_HIGH)) {
-        // enter wifi mode
-        status = nx_ip_delete(&g_http_ip);
-        status = nx_ip_create(&g_http_ip, "HTTP IP Instance",
-                              IP_ADDRESS(0,0,0,0), IP_ADDRESS(255, 255, 255, 0),
-                              &g_http_packet_pool, g_sf_el_nx0,
-                              mem_ip_stack, sizeof(mem_ip_stack), 2);
-        /** Wait for init to finish. */
-        status = nx_ip_interface_status_check(&g_http_ip, 0, NX_IP_LINK_ENABLED, &actual_status_bits, 100);
-
-        status = nx_ip_fragment_enable(&g_http_ip);
-
-        status = nx_arp_enable(&g_http_ip, mem_arp, sizeof(mem_arp));
-
-        status = nx_tcp_enable(&g_http_ip);
-
-        status = nx_udp_enable(&g_http_ip);
-
-        status = nx_icmp_enable(&g_http_ip);
-
-        status = nx_ip_status_check(&g_http_ip, NX_IP_LINK_ENABLED, &actual_status_bits, LINK_UP_TIMEOUT);
-        if ((status == NX_SUCCESS) && !parse_wifi_credentials(prov.ssid, sizeof(prov.ssid), prov.key, sizeof(prov.key))) {
-            p_nx_ip_connection = &g_http_ip;
-            prov.mode = SF_WIFI_INTERFACE_MODE_CLIENT;
-            prov.encryption = SF_WIFI_ENCRYPTION_TYPE_AUTO;
-            prov.security = SF_WIFI_SECURITY_TYPE_WPA2;
-            prov.p_callback = wifi_change;
-            ULONG start = tx_time_get();
-            do {
-                status = g_sf_wifi0.p_api->provisioningSet(g_sf_wifi0.p_ctrl, &prov);
-            } while ((status != SSP_SUCCESS) && ((tx_time_get() - start)  < WIFI_ASSOCIATE_TIMEOUT));
-            if (status != SSP_SUCCESS)
-                p_nx_ip_connection = NULL;
-            else {
-                status = nx_dhcp_create(&g_dhcp, &g_http_ip, "dhcp");
-                status = nx_dhcp_start(&g_dhcp);
-                do {
-                    status = nx_ip_status_check(&g_http_ip, NX_IP_ADDRESS_RESOLVED, &actual_status_bits, NX_WAIT_FOREVER);
-                } while (actual_status_bits != NX_IP_ADDRESS_RESOLVED);
-            }
-        }
-    }
     if (p_nx_ip_connection == NULL) {
        // no working network connections, die
+       cfprint(fp_file, "no available network connection\r\n");
+       fclose(fp_file);
        return -1;
     }
+
+    fclose(fp_file);
 
     status = nx_dns_create(&g_dns_client, &g_http_ip, (UCHAR *)"Netx DNS");
     if (status) APP_TRAP();
