@@ -295,6 +295,8 @@ FX_STDIO_FILE   *file_ptr;
     /* Clear the file entry out.  */
     file_ptr -> fx_stdio_mode =  0;
 
+    fx_media_flush(file_ptr->fx_stdio_filex_file.fx_file_media_ptr);
+
     /* Release semaphore. */
     tx_semaphore_put(&_fx_stdio_semaphore);
 
