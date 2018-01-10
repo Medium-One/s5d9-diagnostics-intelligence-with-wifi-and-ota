@@ -32,6 +32,7 @@ void SetMacAddress(nx_mac_address_t *p_mac_config);
 int network_setup(FX_MEDIA * pMedia);
 void R_BSP_WarmStart (bsp_warm_start_event_t event);
 ssp_err_t R_IOPORT_PinCfg (ioport_port_pin_t pin, uint32_t cfg);
+ssp_err_t R_IOPORT_PinRead (ioport_port_pin_t pin, ioport_level_t * p_pin_value);
 
 static UCHAR    g_qspi_mem[QSPI_SUB_SECTOR_SIZE] BSP_ALIGN_VARIABLE(8);
 FX_MEDIA g_qspi_media;
@@ -96,7 +97,6 @@ void SetMacAddress(nx_mac_address_t *p_mac_config)
 
 static int parse_wifi_credentials(char * ssid, size_t ssid_size, char * passkey, size_t pass_size) {
     FILE * file;
-    ULONG status;
     int ret = 0;
 
     file = fopen("wifi.txt", "r");
@@ -124,6 +124,8 @@ static void wifi_change(sf_wifi_callback_args_t * p_args) {
             break;
         case SF_WIFI_EVENT_AP_CONNECT:
             set_led(4, 0);
+            break;
+        default:
             break;
     }
 }
@@ -391,7 +393,6 @@ void  usb_init(void);
 void system_thread_entry(void)
 {
     UINT status;
-    ULONG actual_status_bits;
 
     status = fx_media_open(&g_qspi_media, (CHAR *) "QSPI Media", _fx_qspi_driver, (void *) &g_qspi, g_qspi_mem, QSPI_SUB_SECTOR_SIZE);
     if (FX_SUCCESS == status)
@@ -445,17 +446,5 @@ void system_thread_entry(void)
     {
         tx_semaphore_get(&g_usb_qspi_active, 200);
         fx_media_flush(&g_qspi_media);
-        status = tx_semaphore_get(&g_wifi_changed, 1);
-#if 0
-        if (status == TX_SUCCESS) {
-            do {
-                status = g_sf_wifi0.p_api->provisioningSet(g_sf_wifi0.p_ctrl, &prov);
-            } while (status != SSP_SUCCESS);
-            status = nx_dhcp_force_renew(&g_dhcp);
-            do {
-                status = nx_ip_status_check(&g_http_ip, NX_IP_ADDRESS_RESOLVED, &actual_status_bits, NX_WAIT_FOREVER);
-            } while (actual_status_bits != NX_IP_ADDRESS_RESOLVED);
-        }
-#endif
     }
 }
