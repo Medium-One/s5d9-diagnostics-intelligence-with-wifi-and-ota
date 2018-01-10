@@ -686,7 +686,7 @@
       <property id="_symbol" value="system_thread"/>
       <property id="rtos.threadx.thread.name" value="System Thread"/>
       <property id="rtos.threadx.thread.stack" value="8192"/>
-      <property id="rtos.threadx.thread.priority" value="10"/>
+      <property id="rtos.threadx.thread.priority" value="19"/>
       <property id="rtos.threadx.thread.autostart" value="rtos.threadx.thread.autostart.enabled"/>
       <property id="rtos.threadx.thread.timeslice" value="1"/>
       <stack module="module.el.ux_device_class_storage.175328432">
@@ -759,7 +759,7 @@
       <property id="_symbol" value="adc_thread"/>
       <property id="rtos.threadx.thread.name" value="ADCThread"/>
       <property id="rtos.threadx.thread.stack" value="8192"/>
-      <property id="rtos.threadx.thread.priority" value="15"/>
+      <property id="rtos.threadx.thread.priority" value="20"/>
       <property id="rtos.threadx.thread.autostart" value="rtos.threadx.thread.autostart.disabled"/>
       <property id="rtos.threadx.thread.timeslice" value="1"/>
       <stack module="module.framework.sf_adc_periodic_on_sf_adc_periodic.1896888085">
@@ -776,7 +776,7 @@
       <property id="_symbol" value="bmc_thread"/>
       <property id="rtos.threadx.thread.name" value="BMC Thread"/>
       <property id="rtos.threadx.thread.stack" value="4096"/>
-      <property id="rtos.threadx.thread.priority" value="15"/>
+      <property id="rtos.threadx.thread.priority" value="20"/>
       <property id="rtos.threadx.thread.autostart" value="rtos.threadx.thread.autostart.disabled"/>
       <property id="rtos.threadx.thread.timeslice" value="1"/>
     </context>
@@ -784,7 +784,7 @@
       <property id="_symbol" value="ens_thread"/>
       <property id="rtos.threadx.thread.name" value="ENS Thread"/>
       <property id="rtos.threadx.thread.stack" value="4096"/>
-      <property id="rtos.threadx.thread.priority" value="15"/>
+      <property id="rtos.threadx.thread.priority" value="20"/>
       <property id="rtos.threadx.thread.autostart" value="rtos.threadx.thread.autostart.disabled"/>
       <property id="rtos.threadx.thread.timeslice" value="1"/>
     </context>
@@ -792,7 +792,7 @@
       <property id="_symbol" value="ms_thread"/>
       <property id="rtos.threadx.thread.name" value="MS Thread"/>
       <property id="rtos.threadx.thread.stack" value="4096"/>
-      <property id="rtos.threadx.thread.priority" value="15"/>
+      <property id="rtos.threadx.thread.priority" value="20"/>
       <property id="rtos.threadx.thread.autostart" value="rtos.threadx.thread.autostart.disabled"/>
       <property id="rtos.threadx.thread.timeslice" value="1"/>
     </context>
@@ -800,7 +800,7 @@
       <property id="_symbol" value="gpio_thread"/>
       <property id="rtos.threadx.thread.name" value="GPIO Thread"/>
       <property id="rtos.threadx.thread.stack" value="4096"/>
-      <property id="rtos.threadx.thread.priority" value="15"/>
+      <property id="rtos.threadx.thread.priority" value="20"/>
       <property id="rtos.threadx.thread.autostart" value="rtos.threadx.thread.autostart.enabled"/>
       <property id="rtos.threadx.thread.timeslice" value="1"/>
       <stack module="module.driver.external_irq_on_icu.1410734425"/>
