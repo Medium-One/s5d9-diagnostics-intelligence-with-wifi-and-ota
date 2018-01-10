@@ -37,6 +37,9 @@ static UCHAR    g_qspi_mem[QSPI_SUB_SECTOR_SIZE] BSP_ALIGN_VARIABLE(8);
 FX_MEDIA g_qspi_media;
 char g_link_code[7];
 
+
+#define APP_TRAP() do{set_led(0x7, 1);__BKPT();}while(0)
+
 #define IP_STACK_SIZE 2048
 #define ARP_SIZE 512
 #define LINK_UP_TIMEOUT 500
@@ -274,76 +277,75 @@ int network_setup(FX_MEDIA * pMedia)
     }
 
     status = nx_dns_create(&g_dns_client, &g_http_ip, (UCHAR *)"Netx DNS");
-    if (status) __BKPT();
+    if (status) APP_TRAP();
 
     status = nx_ip_address_get(&g_http_ip, &ip_address, &ip_mask );
-    if (status) __BKPT();
+    if (status) APP_TRAP();
 
     fx_file_delete(pMedia, "ipconfig.txt");
     status = fx_media_flush(pMedia);
-    if (status)
-           __BKPT();
+    if (status) APP_TRAP();
 
     status = fx_file_create(pMedia, "ipconfig.txt");
-    if (status) __BKPT();
+    if (status) APP_TRAP();
 
     status = fx_file_open(pMedia, &file, "ipconfig.txt", FX_OPEN_FOR_WRITE);
-    if (status) __BKPT();
+    if (status) APP_TRAP();
 
     sprintf(msg, "IP Address: %d.%d.%d.%d\r\n", (int)(ip_address>>24), (int)(ip_address>>16)&0xFF, (int)(ip_address>>8)&0xFF, (int)(ip_address)&0xFF );
     status = fx_file_write(&file, msg, strlen(msg));
-    if (status) __BKPT();
+    if (status) APP_TRAP();
 
     sprintf(msg, "IP Mask: %d.%d.%d.%d\r\n", (int)(ip_mask>>24), (int)(ip_mask>>16)&0xFF, (int)(ip_mask>>8)&0xFF, (int)(ip_mask)&0xFF );
     status = fx_file_write(&file, msg, strlen(msg));
-    if (status) __BKPT();
+    if (status) APP_TRAP();
 
     dns_ip_size = sizeof(dns_ip);
     status = nx_dhcp_user_option_retrieve(&g_dhcp, NX_DHCP_OPTION_DNS_SVR, (UCHAR *)dns_ip, (UINT *)&dns_ip_size);
     if (status == NX_DHCP_DEST_TO_SMALL) {
         dns_ip[0] = 0x08080808UL;
         status = nx_dns_server_add(&g_dns_client, dns_ip[0]);
-        if ((status != NX_SUCCESS) && (status != NX_DNS_DUPLICATE_ENTRY)) __BKPT();
+        if ((status != NX_SUCCESS) && (status != NX_DNS_DUPLICATE_ENTRY)) APP_TRAP();
 
         sprintf((char *)msg, "DNS Address 1: %d.%d.%d.%d\r\n", (int)(dns_ip[0]>>24), (int)(dns_ip[0]>>16)&0xFF, (int)(dns_ip[0]>>8)&0xFF, (int)(dns_ip[0])&0xFF );
 
         status = fx_file_write(&file, msg, strlen(msg));
-        if (status) __BKPT();
+        if (status) APP_TRAP();
     } else {
-        if (status) __BKPT();
+        if (status) APP_TRAP();
 
         status = nx_dns_server_add(&g_dns_client, dns_ip[0]);
-        if (status) __BKPT();
+        if (status) APP_TRAP();
 
         sprintf((char *)msg, "DNS Address 1: %d.%d.%d.%d\r\n", (int)(dns_ip[0]>>24), (int)(dns_ip[0]>>16)&0xFF, (int)(dns_ip[0]>>8)&0xFF, (int)(dns_ip[0])&0xFF );
 
         status = fx_file_write(&file, msg, strlen(msg));
-        if (status) __BKPT();
+        if (status) APP_TRAP();
 
         if (dns_ip_size > 4)
         {
             status = nx_dns_server_add(&g_dns_client, dns_ip[1]);
-            if (status) __BKPT();
+            if (status) APP_TRAP();
 
             sprintf((char *)msg, "DNS Address 2: %d.%d.%d.%d\r\n", (int)(dns_ip[1]>>24), (int)(dns_ip[1]>>16)&0xFF, (int)(dns_ip[1]>>8)&0xFF, (int)(dns_ip[1])&0xFF );
             status = fx_file_write(&file, msg, strlen(msg));
-            if (status) __BKPT();
+            if (status) APP_TRAP();
         }
     }
 
     status = nx_ip_interface_info_get(&g_http_ip, 0, &interface_name, &ip_address, &ip_mask, &mtu_size, &mac_high, &mac_low);
-    if (status) __BKPT();
+    if (status) APP_TRAP();
 
     sprintf(msg, "MAC Address: %02X:%02X:%02X:%02X:%02X:%02X\r\n",(int) (mac_high>>8), (int) (mac_high&0xFF), (int) (mac_low>>24), (int) (mac_low>>16&0xFF),(int) (mac_low>>8&0xFF),(int) (mac_low&0xFF));
     status = fx_file_write(&file, msg, strlen(msg));
-    if (status) __BKPT();
+    if (status) APP_TRAP();
 
     status = fx_file_close(&file);
     if (status)
-           __BKPT();
+           APP_TRAP();
     status = fx_media_flush(pMedia);
     if (status)
-           __BKPT();
+           APP_TRAP();
 
     return 0;
 }
