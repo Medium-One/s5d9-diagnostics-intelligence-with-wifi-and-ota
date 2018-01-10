@@ -25,6 +25,7 @@
 
 
 extern TX_THREAD net_thread;
+extern app_config_t app_config;
 
 
 void SetMacAddress(nx_mac_address_t *p_mac_config);
@@ -121,6 +122,50 @@ static void wifi_change(sf_wifi_callback_args_t * p_args) {
             set_led(4, 0);
             break;
     }
+}
+
+/*
+ * extracts credentials from the file "m1config.txt".
+ * the expected structure is:
+ *      <api key>
+ *      <mqtt project id>
+ *      <mqtt registration user id> <- optional
+ *      <registration user password> <- required if <mqtt registration user id> present
+ * Returns:
+ *      - -1 if "m1config.txt" does not exist
+ *      - -2 if the first line cannot be read or encounters EOF
+ *      - -3 if the second line cannot be read or encounters EOF
+ *      - -4 if the third line cannot be read or encounters EOF
+ *      - -5 if the last line cannot be read
+ */
+static int extract_credentials_from_config(project_credentials_t * project, user_credentials_t * user) {
+    int ret = 0;
+    FILE * config_file = fopen("m1config.txt", "r");
+    if (!config_file)
+        return -1;
+    if (get_line(config_file, project->apikey, sizeof(project->apikey), 0)) {
+        ret = -2;
+        goto end;
+    }
+    if (get_line(config_file, project->proj_id, sizeof(project->proj_id), 1)) {
+        ret = -3;
+        goto end;
+    }
+    if (get_line(config_file, user->user_id, sizeof(user->user_id), 0)) {
+        ret = -4;
+        goto end;
+    }
+    if (get_line(config_file, user->password, sizeof(user->password), 1)) {
+        ret = -5;
+        goto end;
+    }
+end:
+    fclose(config_file);
+    return ret;
+}
+
+static void cfprint(FILE * fp_file, const char * str) {
+    fwrite(str, strlen(str), 1, fp_file);
 }
 
 int network_setup(FX_MEDIA * pMedia)
@@ -317,7 +362,7 @@ void system_thread_entry(void)
     }
     if (network_setup(&g_qspi_media))
         set_led(4,  1);
-    tx_thread_resume(&net_thread);
+
     g_sce_0.p_api->open(g_sce_0.p_ctrl, g_sce_0.p_cfg);
     g_sce_trng.p_api->open(g_sce_trng.p_ctrl, g_sce_trng.p_cfg);
     uint32_t rand = 0;
@@ -331,6 +376,26 @@ void system_thread_entry(void)
     fwrite(g_link_code, 7, 1, f);
     fclose(f);
     fx_media_flush(&g_qspi_media);
+
+    memset(&app_config, 0, sizeof(app_config));
+
+    // credentials from m1config.txt
+    extract_credentials_from_config(&app_config.project, &app_config.registration);
+
+    FILE * f_manual_creds;
+
+    // optional override via m1user.txt
+    if ((f_manual_creds = fopen("m1user.txt", "r"))) {
+        if (!get_line(f_manual_creds, app_config.device.user_id, sizeof(app_config.device.user_id), 0))
+            get_line(f_manual_creds, app_config.device.password, sizeof(app_config.device.password), 1);
+        fclose(f_manual_creds);
+    }
+
+    fx_media_flush(&g_qspi_media);
+
+    // no more QSPI activity
+
+    tx_thread_resume(&net_thread);
 
     /*
      * Make the drive available to the host by enabling enumeration on VBUS

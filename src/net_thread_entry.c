@@ -42,6 +42,7 @@
 #define PROVISIONED_FLAG 1
 
 
+extern TX_THREAD system_thread;
 extern NX_IP g_http_ip;
 extern NX_DNS g_dns_client;
 
@@ -187,46 +188,6 @@ static uint32_t g_update_hash[8];
 static volatile uint8_t g_update_firmware = 0;
 extern FX_MEDIA g_qspi_media;
 
-
-/*
- * extracts credentials from the file "m1config.txt".
- * the expected structure is:
- *      <api key>
- *      <mqtt project id>
- *      <mqtt registration user id> <- optional
- *      <registration user password> <- required if <mqtt registration user id> present
- * Returns:
- *      - -1 if "m1config.txt" does not exist
- *      - -2 if the first line cannot be read or encounters EOF
- *      - -3 if the second line cannot be read or encounters EOF
- *      - -4 if the third line cannot be read or encounters EOF
- *      - -5 if the last line cannot be read
- */
-static int extract_credentials_from_config(project_credentials_t * project, user_credentials_t * user) {
-    int ret = 0;
-    FILE * config_file = fopen("m1config.txt", "r");
-    if (!config_file)
-        return -1;
-    if (get_line(config_file, project->apikey, sizeof(project->apikey), 0)) {
-        ret = -2;
-        goto end;
-    }
-    if (get_line(config_file, project->proj_id, sizeof(project->proj_id), 1)) {
-        ret = -3;
-        goto end;
-    }
-    if (get_line(config_file, user->user_id, sizeof(user->user_id), 0)) {
-        ret = -4;
-        goto end;
-    }
-    if (get_line(config_file, user->password, sizeof(user->password), 1)) {
-        ret = -5;
-        goto end;
-    }
-end:
-    fclose(config_file);
-    return ret;
-}
 
 /*
  * handles messages published to one of the topics subscribed to by the m1 agent.
@@ -426,8 +387,10 @@ static int read_certs_and_connect(const char * p_mqtt_broker_host,
                                   project_credentials_t * project,
                                   user_credentials_t * registration,
                                   user_credentials_t * device) {
+#ifdef CERT_BASED_AUTH
     char cert_buf[MAX_CERT_LENGTH];
     char key_buf[MAX_KEY_LENGTH];
+#endif
 
     m1_connect_params params = {
                                 .mqtt_url = p_mqtt_broker_host,
@@ -458,6 +421,8 @@ static int read_certs_and_connect(const char * p_mqtt_broker_host,
                                 .p_ip = &g_http_ip,
                                 .p_dns = &g_dns_client
     };
+#ifdef CERT_BASED_AUTH
+#if 0
     FILE * device_cert = fopen("device.crt", "r");
     FILE * device_key = fopen("device.key", "r");
     if (device_cert && device_key) {
@@ -470,6 +435,8 @@ static int read_certs_and_connect(const char * p_mqtt_broker_host,
         params.device_cert = cert_buf;
         params.device_key = key_buf;
     }
+#endif
+#endif
 
     return m1_auto_enroll_connect_2(&params);
 }
@@ -538,7 +505,7 @@ void net_thread_entry(void)
     char buf[400];
     int provisioned = 0;
     fmi_product_info_t * effmi;
-    app_config_t app_config, provisioned_config;
+    app_config_t provisioned_config;
     user_credentials_t original_device;
     original_device.user_id[0] = '\0';
     original_device.password[0] = '\0';
@@ -568,8 +535,6 @@ void net_thread_entry(void)
 #endif
     };
 #endif
-    FILE * f_manual_creds;
-    char mqtt_broker_host[64] = {0};
     const char * p_mqtt_broker_host = rna_broker_url;
     uint16_t mqtt_broker_port = rna_port;
     ULONG start, actual_flags;
@@ -603,32 +568,6 @@ void net_thread_entry(void)
         provisioned = 1;
         memcpy(&original_device, &app_config.device, sizeof(original_device));
     }
-
-    ret = extract_credentials_from_config(&app_config.project, &app_config.registration);
-
-    if ((f_manual_creds = fopen("m1user.txt", "r"))) {
-        if ((!get_line(f_manual_creds, app_config.device.user_id, sizeof(app_config.device.user_id), 0))
-            && (!get_line(f_manual_creds, app_config.device.password, sizeof(app_config.device.password), 1))) {
-                provisioned = 1;
-                memcpy(&original_device, &app_config.device, sizeof(original_device));
-        }
-        fclose(f_manual_creds);
-    }
-
-    if ((f_manual_creds = fopen("m1broker.txt", "r"))) {
-        if (!get_line(f_manual_creds, buf, sizeof(buf), 0)) {
-            if ((sscanf(buf, "%hu", &mqtt_broker_port) == 1) &&
-                    !get_line(f_manual_creds, mqtt_broker_host, sizeof(mqtt_broker_host), 1))
-                p_mqtt_broker_host = mqtt_broker_host;
-            else
-                mqtt_broker_port = rna_port;
-        }
-        fclose(f_manual_creds);
-    }
-
-    set_leds(1, 0, 0);
-
-    set_leds(0, 1, 0);
 
     set_leds(0, 1, 1);
 
@@ -702,7 +641,6 @@ void net_thread_entry(void)
             goto err;
     }
 
-    remove("m1config.txt");
 
     unsigned long mac_address[2];
     nx_ip_interface_info_get(&g_http_ip, 0, NULL, NULL, NULL, NULL, &mac_address[0], &mac_address[1]);
@@ -761,6 +699,8 @@ void net_thread_entry(void)
         if (g_update_firmware) {
             char filename[40];
             g_ioport.p_api->pinCfg(IOPORT_PORT_04_PIN_07, IOPORT_CFG_PORT_DIRECTION_INPUT | IOPORT_CFG_NMOS_ENABLE);
+            // suspend system thread to prevent FX media concurrent interaction
+            tx_thread_suspend(&system_thread);
             NX_SECURE_TLS_SESSION tls_session;
             NX_SECURE_X509_CERT github_root_cert;
 #ifdef USE_TLS
@@ -786,6 +726,9 @@ void net_thread_entry(void)
             }
             // if we get here there was an error
             g_update_firmware = 0;
+            tx_thread_resume(&system_thread);
+            // sleep to allow FX media flush
+            tx_thread_sleep(200);
             g_ioport.p_api->pinCfg(IOPORT_PORT_04_PIN_07, IOPORT_CFG_PERIPHERAL_PIN | IOPORT_PERIPHERAL_USB_FS);
         }
         actual_flags = tx_time_get() - start;
