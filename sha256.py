@@ -34,5 +34,4 @@ def get_sha256_hash(data):
         return hash
 
 if __name__ == '__main__':
-	logging.basicConfig(level=logging.DEBUG)
 	print get_sha256_hash(open(sys.argv[1], 'r').read())
