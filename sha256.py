@@ -29,9 +29,11 @@ def get_sha256_hash(data):
                 for word in slicen(newchunk, 4):
                     logging.debug('0x{}'.format(''.join(['{:02x}'.format(ord(x)) for x in word])))
                 first = False
-            s.update(''.join(newchunk))
-        hash = s.hexdigest()
-        return hash
+            s.update(''.join(newchunk).encode())
+        return s.hexdigest()
 
 if __name__ == '__main__':
-	print get_sha256_hash(open(sys.argv[1], 'r').read())
+    if sys.version_info[0] >= 3:
+        print(get_sha256_hash(open(sys.argv[1], 'r', newline='').read()))
+    else:
+        print(get_sha256_hash(open(sys.argv[1], 'r').read()))
