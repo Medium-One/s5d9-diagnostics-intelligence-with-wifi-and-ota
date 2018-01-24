@@ -36,6 +36,8 @@
 #define MAX_KEY_LENGTH 2048
 
 
+extern const unsigned char M1_ROOT_CERT[1082];
+
 // Error Codes
 enum {
     M1_SUCCESS = 0,
@@ -74,15 +76,15 @@ typedef struct {
     int mqtt_heart_beat;
     int tls_enabled;
     void * stack_mem;
-    int stack_mem_size; // 1k? 2k?
+    int stack_mem_size; // min?
     void * mqtt_msg_mem;
     int mqtt_msg_mem_size; // 2k * 10?
     void * ssl_mem;
-    int ssl_mem_size; // 4k?
+    int ssl_mem_size; // min? must be able to accomodate max mqtt msg size + TLS overhead
     void * crypto_mem;
-    int crypto_mem_size; // 4k?
+    int crypto_mem_size; // 9k for s7 crypto table
     void * cert_mem;
-    int cert_mem_size; // 2k * 4 (4 certs in m1 chain)
+    int cert_mem_size; // 2k * 3 (3 certs in m1 chain)
     NX_PACKET_POOL * p_ppool;
     NX_IP * p_ip;
     NX_DNS * p_dns;

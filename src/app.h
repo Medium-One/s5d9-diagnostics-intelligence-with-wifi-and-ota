@@ -26,7 +26,7 @@
 #define APP_H_
 
 
-#define VERSION_MAJOR 1
+#define VERSION_MAJOR 2
 #define VERSION_MINOR 0
 
 // sensor event flags
@@ -53,7 +53,8 @@
 #define RATE_LIMIT      1000
 
 // enable M1 Diagnostics Agent usage
-#define USE_M1DIAG
+// TODO: disabled until EL fixes multiple MQTT clients
+//#define USE_M1DIAG
 
 
 #define BUILD_YEAR_CH0 (__DATE__[ 7])
