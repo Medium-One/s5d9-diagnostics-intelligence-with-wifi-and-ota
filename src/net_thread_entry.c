@@ -24,6 +24,7 @@
  */
 #include "net_thread.h"
 #include "system_thread.h"
+#include "r_flash_api.h"
 #include "nxd_dns.h"
 #include "nxd_dhcp_client.h"
 #include "fx_stdio.h"
@@ -38,15 +39,64 @@
 #include <m1diagnostics_agent.h>
 #endif
 
-#define DATA_FLASH_BLOCK_SIZE 64
-#define PROVISIONED_FLAG 1
+
+//************ macros ************
+#define TLS_PACKET_BUFFER_MEM_SIZE (6 * 1024)
+#define MQTT_STACK_SIZE (8 * 1024)
+#define MAX_MQTT_MSGS 10
+#define MQTT_MSG_MEM_SIZE (MAX_MQTT_MSGS * NXD_MQTT_MAX_MESSAGE_LENGTH)
+#define CRYPTO_METADATA_MEM_SIZE 2104
+#define MAX_CERTS 3
+#define CERT_SIZE (2 * 1024)
+#define CERT_MEM_SIZE (MAX_CERTS * CERT_SIZE)
+#define SENSORS 13
+
+#ifdef USE_M1DIAG
+#define DEV_DIAG
+
+#ifdef USE_TLS
+// old diag agent api takes single memory block for both packet buffers and metadata
+#define DIAG_SSL_MEM_SIZE (TLS_PACKET_BUFFER_MEM_SIZE + CRYPTO_METADATA_MEM_SIZE)
+#endif
+#endif
 
 
+//************ externs ************
+extern char g_link_code[7];
+extern TX_THREAD net_thread;
+extern TX_THREAD adc_thread;
+extern TX_THREAD bmc_thread;
+extern TX_THREAD ens_thread;
+extern TX_THREAD ms_thread;
 extern TX_THREAD system_thread;
 extern NX_IP g_http_ip;
 extern NX_DNS g_dns_client;
+extern const NX_SECURE_TLS_CRYPTO nx_crypto_tls_ciphers_synergys7;
+extern FX_MEDIA g_qspi_media;
+
+#ifdef USE_M1DIAG
+/*
+ * the diagnostics agent asynchronously samples peripherals.
+ * to ensure it sees real-time updated data, we expose the "local" aggregate
+ * structures used by the sensor threads
+ */
+extern volatile agg_t x;
+extern volatile agg_t y;
+extern volatile agg_t z;
+extern volatile agg_t temp1;
+extern volatile agg_t x_mag;
+extern volatile agg_t y_mag;
+extern volatile agg_t z_mag;
+extern volatile agg_t temp2;
+extern volatile agg_t humidity;
+extern volatile agg_t temp3;
+extern volatile agg_t pressure;
+extern volatile agg_t mic;
+extern volatile agg_t voice_fft;
+#endif
 
 
+//************ global variables ************
 /*
  * global sensor aggregates
  *
@@ -72,74 +122,20 @@ volatile uint32_t g_x_zero_crossings = 0, g_y_zero_crossings = 0, g_z_zero_cross
 
 app_config_t app_config;
 
-#ifdef USE_M1DIAG
-/*
- * the diagnostics agent asynchronously samples peripherals.
- * to ensure it sees real-time updated data, we expose the "local" aggregate
- * structures used by the sensor threads
- */
-extern volatile agg_t x;
-extern volatile agg_t y;
-extern volatile agg_t z;
-extern volatile agg_t temp1;
-extern volatile agg_t x_mag;
-extern volatile agg_t y_mag;
-extern volatile agg_t z_mag;
-extern volatile agg_t temp2;
-extern volatile agg_t humidity;
-extern volatile agg_t temp3;
-extern volatile agg_t pressure;
-extern volatile agg_t mic;
-extern volatile agg_t voice_fft;
 
-static periphery_access_t x_accel_access = {(char)1, NULL, {.address=&x.value}};
-static periphery_access_t y_accel_access = {(char)1, NULL, {.address=&y.value}};
-static periphery_access_t z_accel_access = {(char)1, NULL, {.address=&z.value}};
-static periphery_access_t temp_access = {(char)1, NULL, {.address=&temp1.value}};
-static periphery_access_t xmag_access = {(char)1, NULL, {.address=&x_mag.value}};
-static periphery_access_t ymag_access = {(char)1, NULL, {.address=&y_mag.value}};
-static periphery_access_t zmag_access = {(char)1, NULL, {.address=&z_mag.value}};
-static periphery_access_t temp2_access = {(char)1, NULL, {.address=&temp2.value}};
-static periphery_access_t humidity_access = {(char)1, NULL, {.address=&humidity.value}};
-static periphery_access_t temp3_access = {(char)1, NULL, {.address=&temp3.value}};
-static periphery_access_t pressure_access = {(char)1, NULL, {.address=&pressure.value}};
-static periphery_access_t mic_access = {(char)1, NULL, {.address=&mic.value}};
-static periphery_access_t voice_fft_access = {(char)1, NULL, {.address=&voice_fft.value}};
-
+//************ local variables ************
 #ifdef USE_TLS
-#define DIAG_SSL_MEM_SIZE (8 * 1024)
-static char diag_ssl_mem[DIAG_SSL_MEM_SIZE];
+static char ssl_mem[TLS_PACKET_BUFFER_MEM_SIZE];
+static char crypto_mem[CRYPTO_METADATA_MEM_SIZE];
+static char cert_mem[CERT_MEM_SIZE];
+static char ota_crypto_mem[CRYPTO_METADATA_MEM_SIZE];
 #endif
-#endif
-
-#ifdef USE_TLS
-#define SSL_MEM_SIZE (4 * 1024)
-static char ssl_mem[SSL_MEM_SIZE];
-#endif
-#define MQTT_STACK_SIZE (8 * 1024)
 static char mqtt_stack[MQTT_STACK_SIZE];
-#define MQTT_MSG_MEM_SIZE (10 * 1024)
-static char * mqtt_msg_mem[MQTT_MSG_MEM_SIZE];
-#define CRYPTO_MEM_SIZE (4 * 1024)
-char * crypto_mem[CRYPTO_MEM_SIZE];
-#define MAX_CERTS 4
-#define CERT_MEM_SIZE (MAX_CERTS * 2048)
-char * cert_mem[CERT_MEM_SIZE];
-
-
-//#ifdef USE_TLS
-extern const NX_SECURE_TLS_CRYPTO nx_crypto_tls_ciphers_synergys7;
-static const uint8_t uguu_root[] = {0x30, 0x82, 0x4, 0x92, 0x30, 0x82, 0x3, 0x7a, 0xa0, 0x3, 0x2, 0x1, 0x2, 0x2, 0x10, 0xa, 0x1, 0x41, 0x42, 0x0, 0x0, 0x1, 0x53, 0x85, 0x73, 0x6a, 0xb, 0x85, 0xec, 0xa7, 0x8, 0x30, 0xd, 0x6, 0x9, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0xd, 0x1, 0x1, 0xb, 0x5, 0x0, 0x30, 0x3f, 0x31, 0x24, 0x30, 0x22, 0x6, 0x3, 0x55, 0x4, 0xa, 0x13, 0x1b, 0x44, 0x69, 0x67, 0x69, 0x74, 0x61, 0x6c, 0x20, 0x53, 0x69, 0x67, 0x6e, 0x61, 0x74, 0x75, 0x72, 0x65, 0x20, 0x54, 0x72, 0x75, 0x73, 0x74, 0x20, 0x43, 0x6f, 0x2e, 0x31, 0x17, 0x30, 0x15, 0x6, 0x3, 0x55, 0x4, 0x3, 0x13, 0xe, 0x44, 0x53, 0x54, 0x20, 0x52, 0x6f, 0x6f, 0x74, 0x20, 0x43, 0x41, 0x20, 0x58, 0x33, 0x30, 0x1e, 0x17, 0xd, 0x31, 0x36, 0x30, 0x33, 0x31, 0x37, 0x31, 0x36, 0x34, 0x30, 0x34, 0x36, 0x5a, 0x17, 0xd, 0x32, 0x31, 0x30, 0x33, 0x31, 0x37, 0x31, 0x36, 0x34, 0x30, 0x34, 0x36, 0x5a, 0x30, 0x4a, 0x31, 0xb, 0x30, 0x9, 0x6, 0x3, 0x55, 0x4, 0x6, 0x13, 0x2, 0x55, 0x53, 0x31, 0x16, 0x30, 0x14, 0x6, 0x3, 0x55, 0x4, 0xa, 0x13, 0xd, 0x4c, 0x65, 0x74, 0x27, 0x73, 0x20, 0x45, 0x6e, 0x63, 0x72, 0x79, 0x70, 0x74, 0x31, 0x23, 0x30, 0x21, 0x6, 0x3, 0x55, 0x4, 0x3, 0x13, 0x1a, 0x4c, 0x65, 0x74, 0x27, 0x73, 0x20, 0x45, 0x6e, 0x63, 0x72, 0x79, 0x70, 0x74, 0x20, 0x41, 0x75, 0x74, 0x68, 0x6f, 0x72, 0x69, 0x74, 0x79, 0x20, 0x58, 0x33, 0x30, 0x82, 0x1, 0x22, 0x30, 0xd, 0x6, 0x9, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0xd, 0x1, 0x1, 0x1, 0x5, 0x0, 0x3, 0x82, 0x1, 0xf, 0x0, 0x30, 0x82, 0x1, 0xa, 0x2, 0x82, 0x1, 0x1, 0x0, 0x9c, 0xd3, 0xc, 0xf0, 0x5a, 0xe5, 0x2e, 0x47, 0xb7, 0x72, 0x5d, 0x37, 0x83, 0xb3, 0x68, 0x63, 0x30, 0xea, 0xd7, 0x35, 0x26, 0x19, 0x25, 0xe1, 0xbd, 0xbe, 0x35, 0xf1, 0x70, 0x92, 0x2f, 0xb7, 0xb8, 0x4b, 0x41, 0x5, 0xab, 0xa9, 0x9e, 0x35, 0x8, 0x58, 0xec, 0xb1, 0x2a, 0xc4, 0x68, 0x87, 0xb, 0xa3, 0xe3, 0x75, 0xe4, 0xe6, 0xf3, 0xa7, 0x62, 0x71, 0xba, 0x79, 0x81, 0x60, 0x1f, 0xd7, 0x91, 0x9a, 0x9f, 0xf3, 0xd0, 0x78, 0x67, 0x71, 0xc8, 0x69, 0xe, 0x95, 0x91, 0xcf, 0xfe, 0xe6, 0x99, 0xe9, 0x60, 0x3c, 0x48, 0xcc, 0x7e, 0xca, 0x4d, 0x77, 0x12, 0x24, 0x9d, 0x47, 0x1b, 0x5a, 0xeb, 0xb9, 0xec, 0x1e, 0x37, 0x0, 0x1c, 0x9c, 0xac, 0x7b, 0xa7, 0x5, 0xea, 0xce, 0x4a, 0xeb, 0xbd, 0x41, 0xe5, 0x36, 0x98, 0xb9, 0xcb, 0xfd, 0x6d, 0x3c, 0x96, 0x68, 0xdf, 0x23, 0x2a, 0x42, 0x90, 0xc, 0x86, 0x74, 0x67, 0xc8, 0x7f, 0xa5, 0x9a, 0xb8, 0x52, 0x61, 0x14, 0x13, 0x3f, 0x65, 0xe9, 0x82, 0x87, 0xcb, 0xdb, 0xfa, 0xe, 0x56, 0xf6, 0x86, 0x89, 0xf3, 0x85, 0x3f, 0x97, 0x86, 0xaf, 0xb0, 0xdc, 0x1a, 0xef, 0x6b, 0xd, 0x95, 0x16, 0x7d, 0xc4, 0x2b, 0xa0, 0x65, 0xb2, 0x99, 0x4, 0x36, 0x75, 0x80, 0x6b, 0xac, 0x4a, 0xf3, 0x1b, 0x90, 0x49, 0x78, 0x2f, 0xa2, 0x96, 0x4f, 0x2a, 0x20, 0x25, 0x29, 0x4, 0xc6, 0x74, 0xc0, 0xd0, 0x31, 0xcd, 0x8f, 0x31, 0x38, 0x95, 0x16, 0xba, 0xa8, 0x33, 0xb8, 0x43, 0xf1, 0xb1, 0x1f, 0xc3, 0x30, 0x7f, 0xa2, 0x79, 0x31, 0x13, 0x3d, 0x2d, 0x36, 0xf8, 0xe3, 0xfc, 0xf2, 0x33, 0x6a, 0xb9, 0x39, 0x31, 0xc5, 0xaf, 0xc4, 0x8d, 0xd, 0x1d, 0x64, 0x16, 0x33, 0xaa, 0xfa, 0x84, 0x29, 0xb6, 0xd4, 0xb, 0xc0, 0xd8, 0x7d, 0xc3, 0x93, 0x2, 0x3, 0x1, 0x0, 0x1, 0xa3, 0x82, 0x1, 0x7d, 0x30, 0x82, 0x1, 0x79, 0x30, 0x12, 0x6, 0x3, 0x55, 0x1d, 0x13, 0x1, 0x1, 0xff, 0x4, 0x8, 0x30, 0x6, 0x1, 0x1, 0xff, 0x2, 0x1, 0x0, 0x30, 0xe, 0x6, 0x3, 0x55, 0x1d, 0xf, 0x1, 0x1, 0xff, 0x4, 0x4, 0x3, 0x2, 0x1, 0x86, 0x30, 0x7f, 0x6, 0x8, 0x2b, 0x6, 0x1, 0x5, 0x5, 0x7, 0x1, 0x1, 0x4, 0x73, 0x30, 0x71, 0x30, 0x32, 0x6, 0x8, 0x2b, 0x6, 0x1, 0x5, 0x5, 0x7, 0x30, 0x1, 0x86, 0x26, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x69, 0x73, 0x72, 0x67, 0x2e, 0x74, 0x72, 0x75, 0x73, 0x74, 0x69, 0x64, 0x2e, 0x6f, 0x63, 0x73, 0x70, 0x2e, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x72, 0x75, 0x73, 0x74, 0x2e, 0x63, 0x6f, 0x6d, 0x30, 0x3b, 0x6, 0x8, 0x2b, 0x6, 0x1, 0x5, 0x5, 0x7, 0x30, 0x2, 0x86, 0x2f, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x61, 0x70, 0x70, 0x73, 0x2e, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x72, 0x75, 0x73, 0x74, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x72, 0x6f, 0x6f, 0x74, 0x73, 0x2f, 0x64, 0x73, 0x74, 0x72, 0x6f, 0x6f, 0x74, 0x63, 0x61, 0x78, 0x33, 0x2e, 0x70, 0x37, 0x63, 0x30, 0x1f, 0x6, 0x3, 0x55, 0x1d, 0x23, 0x4, 0x18, 0x30, 0x16, 0x80, 0x14, 0xc4, 0xa7, 0xb1, 0xa4, 0x7b, 0x2c, 0x71, 0xfa, 0xdb, 0xe1, 0x4b, 0x90, 0x75, 0xff, 0xc4, 0x15, 0x60, 0x85, 0x89, 0x10, 0x30, 0x54, 0x6, 0x3, 0x55, 0x1d, 0x20, 0x4, 0x4d, 0x30, 0x4b, 0x30, 0x8, 0x6, 0x6, 0x67, 0x81, 0xc, 0x1, 0x2, 0x1, 0x30, 0x3f, 0x6, 0xb, 0x2b, 0x6, 0x1, 0x4, 0x1, 0x82, 0xdf, 0x13, 0x1, 0x1, 0x1, 0x30, 0x30, 0x30, 0x2e, 0x6, 0x8, 0x2b, 0x6, 0x1, 0x5, 0x5, 0x7, 0x2, 0x1, 0x16, 0x22, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x63, 0x70, 0x73, 0x2e, 0x72, 0x6f, 0x6f, 0x74, 0x2d, 0x78, 0x31, 0x2e, 0x6c, 0x65, 0x74, 0x73, 0x65, 0x6e, 0x63, 0x72, 0x79, 0x70, 0x74, 0x2e, 0x6f, 0x72, 0x67, 0x30, 0x3c, 0x6, 0x3, 0x55, 0x1d, 0x1f, 0x4, 0x35, 0x30, 0x33, 0x30, 0x31, 0xa0, 0x2f, 0xa0, 0x2d, 0x86, 0x2b, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x63, 0x72, 0x6c, 0x2e, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x72, 0x75, 0x73, 0x74, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x44, 0x53, 0x54, 0x52, 0x4f, 0x4f, 0x54, 0x43, 0x41, 0x58, 0x33, 0x43, 0x52, 0x4c, 0x2e, 0x63, 0x72, 0x6c, 0x30, 0x1d, 0x6, 0x3, 0x55, 0x1d, 0xe, 0x4, 0x16, 0x4, 0x14, 0xa8, 0x4a, 0x6a, 0x63, 0x4, 0x7d, 0xdd, 0xba, 0xe6, 0xd1, 0x39, 0xb7, 0xa6, 0x45, 0x65, 0xef, 0xf3, 0xa8, 0xec, 0xa1, 0x30, 0xd, 0x6, 0x9, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0xd, 0x1, 0x1, 0xb, 0x5, 0x0, 0x3, 0x82, 0x1, 0x1, 0x0, 0xdd, 0x33, 0xd7, 0x11, 0xf3, 0x63, 0x58, 0x38, 0xdd, 0x18, 0x15, 0xfb, 0x9, 0x55, 0xbe, 0x76, 0x56, 0xb9, 0x70, 0x48, 0xa5, 0x69, 0x47, 0x27, 0x7b, 0xc2, 0x24, 0x8, 0x92, 0xf1, 0x5a, 0x1f, 0x4a, 0x12, 0x29, 0x37, 0x24, 0x74, 0x51, 0x1c, 0x62, 0x68, 0xb8, 0xcd, 0x95, 0x70, 0x67, 0xe5, 0xf7, 0xa4, 0xbc, 0x4e, 0x28, 0x51, 0xcd, 0x9b, 0xe8, 0xae, 0x87, 0x9d, 0xea, 0xd8, 0xba, 0x5a, 0xa1, 0x1, 0x9a, 0xdc, 0xf0, 0xdd, 0x6a, 0x1d, 0x6a, 0xd8, 0x3e, 0x57, 0x23, 0x9e, 0xa6, 0x1e, 0x4, 0x62, 0x9a, 0xff, 0xd7, 0x5, 0xca, 0xb7, 0x1f, 0x3f, 0xc0, 0xa, 0x48, 0xbc, 0x94, 0xb0, 0xb6, 0x65, 0x62, 0xe0, 0xc1, 0x54, 0xe5, 0xa3, 0x2a, 0xad, 0x20, 0xc4, 0xe9, 0xe6, 0xbb, 0xdc, 0xc8, 0xf6, 0xb5, 0xc3, 0x32, 0xa3, 0x98, 0xcc, 0x77, 0xa8, 0xe6, 0x79, 0x65, 0x7, 0x2b, 0xcb, 0x28, 0xfe, 0x3a, 0x16, 0x52, 0x81, 0xce, 0x52, 0xc, 0x2e, 0x5f, 0x83, 0xe8, 0xd5, 0x6, 0x33, 0xfb, 0x77, 0x6c, 0xce, 0x40, 0xea, 0x32, 0x9e, 0x1f, 0x92, 0x5c, 0x41, 0xc1, 0x74, 0x6c, 0x5b, 0x5d, 0xa, 0x5f, 0x33, 0xcc, 0x4d, 0x9f, 0xac, 0x38, 0xf0, 0x2f, 0x7b, 0x2c, 0x62, 0x9d, 0xd9, 0xa3, 0x91, 0x6f, 0x25, 0x1b, 0x2f, 0x90, 0xb1, 0x19, 0x46, 0x3d, 0xf6, 0x7e, 0x1b, 0xa6, 0x7a, 0x87, 0xb9, 0xa3, 0x7a, 0x6d, 0x18, 0xfa, 0x25, 0xa5, 0x91, 0x87, 0x15, 0xe0, 0xf2, 0x16, 0x2f, 0x58, 0xb0, 0x6, 0x2f, 0x2c, 0x68, 0x26, 0xc6, 0x4b, 0x98, 0xcd, 0xda, 0x9f, 0xc, 0xf9, 0x7f, 0x90, 0xed, 0x43, 0x4a, 0x12, 0x44, 0x4e, 0x6f, 0x73, 0x7a, 0x28, 0xea, 0xa4, 0xaa, 0x6e, 0x7b, 0x4c, 0x7d, 0x87, 0xdd, 0xe0, 0xc9, 0x2, 0x44, 0xa7, 0x87, 0xaf, 0xc3, 0x34, 0x5b, 0xb4, 0x42};
-#define OTA_CRYPTO_MEM_SIZE (9 * 1024)
-char * ota_crypto_mem[OTA_CRYPTO_MEM_SIZE];
-#define OTA_MAX_CERTS 2
-//#endif
-
+static char mqtt_msg_mem[MQTT_MSG_MEM_SIZE];
 
 // TODO: use message framework to update instead of volatile?
-volatile ULONG sample_period = 15 * 60 * 100;
+static volatile ULONG sample_period = 15 * 60 * 100;
 
-#define SENSORS 13
 static volatile agg_t * const sensors[SENSORS] = {&g_x,
                                                   &g_y,
                                                   &g_z,
@@ -160,30 +156,40 @@ static volatile uint8_t leds_to_toggle = 0;
 // holds the number of blinks that should currently be performed in the RTC callback
 static volatile int n_blinks = 0;
 
-extern char g_link_code[7];
-
-extern TX_THREAD net_thread;
-extern TX_THREAD adc_thread;
-extern TX_THREAD bmc_thread;
-extern TX_THREAD ens_thread;
-extern TX_THREAD ms_thread;
-
-// connection details for diagnostics agent
-static const char * rna_broker_url = "mqtt-renesas-na-sandbox.mediumone.com";
-static const uint16_t rna_port = 61619;
-
-
-// extern GPIO pin setting function
-void set_pin(ioport_port_pin_t pin, ioport_level_t level);
-
-// prototype for m1_callback below
-void m1_callback(int type, char * topic, char * msg, int length);
-
 // OTA parameters
 static char g_update_url[640];
 static uint32_t g_update_hash[8];
 static volatile uint8_t g_update_firmware = 0;
-extern FX_MEDIA g_qspi_media;
+
+// connection details for application to sandbox
+static const char * rna_broker_url = "mqtt-renesas-na-sandbox.mediumone.com";
+#ifdef USE_TLS
+static const uint16_t rna_port = 61620;
+#else
+static const uint16_t rna_port = 61619;
+#endif
+
+#ifdef USE_M1DIAG
+static periphery_access_t x_accel_access = {(char)1, NULL, {.address=&x.value}};
+static periphery_access_t y_accel_access = {(char)1, NULL, {.address=&y.value}};
+static periphery_access_t z_accel_access = {(char)1, NULL, {.address=&z.value}};
+static periphery_access_t temp_access = {(char)1, NULL, {.address=&temp1.value}};
+static periphery_access_t xmag_access = {(char)1, NULL, {.address=&x_mag.value}};
+static periphery_access_t ymag_access = {(char)1, NULL, {.address=&y_mag.value}};
+static periphery_access_t zmag_access = {(char)1, NULL, {.address=&z_mag.value}};
+static periphery_access_t temp2_access = {(char)1, NULL, {.address=&temp2.value}};
+static periphery_access_t humidity_access = {(char)1, NULL, {.address=&humidity.value}};
+static periphery_access_t temp3_access = {(char)1, NULL, {.address=&temp3.value}};
+static periphery_access_t pressure_access = {(char)1, NULL, {.address=&pressure.value}};
+static periphery_access_t mic_access = {(char)1, NULL, {.address=&mic.value}};
+static periphery_access_t voice_fft_access = {(char)1, NULL, {.address=&voice_fft.value}};
+#endif
+
+
+//************ global functions ************
+// extern GPIO pin setting function
+void set_pin(ioport_port_pin_t pin, ioport_level_t level);
+
 
 
 /*
@@ -197,7 +203,7 @@ extern FX_MEDIA g_qspi_media;
  *      - B: blink LED(s)
  *      - G: set GPIO pin output level
  */
-void m1_callback(int type, char * topic, char * msg, int length) {
+static void m1_callback(int type, char * topic, char * msg, int length) {
     SSP_PARAMETER_NOT_USED(type);
     SSP_PARAMETER_NOT_USED(topic);
     SSP_PARAMETER_NOT_USED(length);
@@ -340,21 +346,33 @@ void rtc_callback(rtc_callback_args_t * p_args) {
 /*
  * helper function to determine how many dataflash blocks are spanned
  */
-static uint32_t bytes_to_df_blocks(uint32_t bytes) {
-    if (!bytes)
-        return 0;
-    return bytes / DATA_FLASH_BLOCK_SIZE + 1;
+static void bytes_to_df_blocks(uint32_t bytes, flash_info_t * flash_info, uint32_t * write_blocks, uint32_t * erase_blocks) {
+    if (!bytes) {
+        *write_blocks = 0;
+        *erase_blocks = 0;
+        return;
+    }
+    *write_blocks = bytes / flash_info->data_flash.p_block_array[0].block_size_write + 1;
+    *erase_blocks = bytes / flash_info->data_flash.p_block_array[0].block_size + 1;
 }
 
 static int write_struct_to_flash(void * obj, size_t size) {
-    uint32_t blocks = bytes_to_df_blocks(size);
-    ssp_err_t status = g_flash0.p_api->open(g_flash0.p_ctrl, g_flash0.p_cfg);
+    flash_info_t df_info;
+    ssp_err_t status;
+    uint32_t write_blocks, erase_blocks;
+
+    status = g_flash0.p_api->open(g_flash0.p_ctrl, g_flash0.p_cfg);
     if (status)
         return -1;
-    status = g_flash0.p_api->erase(g_flash0.p_ctrl, 0x40100000, blocks);
+    status = g_flash0.p_api->infoGet(g_flash0.p_ctrl, &df_info);
+    if (status)
+        return -5;
+    // TODO: return erase blocks vs write blocks
+    bytes_to_df_blocks(size, &df_info, &write_blocks, &erase_blocks);
+    status = g_flash0.p_api->erase(g_flash0.p_ctrl, 0x40100000, erase_blocks);
     if (status)
         return -2;
-    status = g_flash0.p_api->write(g_flash0.p_ctrl, (uint32_t)obj, 0x40100000, blocks * DATA_FLASH_BLOCK_SIZE);
+    status = g_flash0.p_api->write(g_flash0.p_ctrl, (uint32_t)obj, 0x40100000, write_blocks * df_info.data_flash.p_block_array[0].block_size_write);
     if (status)
         return -3;
     status = g_flash0.p_api->close(g_flash0.p_ctrl);
@@ -406,9 +424,9 @@ static int read_certs_and_connect(const char * p_mqtt_broker_host,
 #ifdef USE_TLS
                                 .tls_enabled = 1,
                                 .ssl_mem = ssl_mem,
-                                .ssl_mem_size = SSL_MEM_SIZE,
+                                .ssl_mem_size = sizeof(ssl_mem),
                                 .crypto_mem = crypto_mem,
-                                .crypto_mem_size = CRYPTO_MEM_SIZE,
+                                .crypto_mem_size = sizeof(crypto_mem),
                                 .cert_mem = cert_mem,
                                 .cert_mem_size = CERT_MEM_SIZE,
 #else
@@ -457,8 +475,10 @@ static int project_compare(project_credentials_t * config1, project_credentials_
 static int config_compare(app_config_t * config1, app_config_t * config2) {
     if (device_compare(&config1->device, &config2->device))
         return -1;
+#ifdef M1_DIAG
     if (device_compare(&config1->diagnostics, &config2->diagnostics))
         return -2;
+#endif
     if (device_compare(&config1->registration, &config2->registration))
         return -3;
     if (project_compare(&config1->project, &config2->project))
@@ -498,46 +518,76 @@ static int config_compare(app_config_t * config1, app_config_t * config2) {
 void net_thread_entry(void)
 {
     ssp_err_t status = SSP_SUCCESS;
-    int ret = 0;
     char buf[400];
+    char event[1536];
+    const char * p_mqtt_broker_host = rna_broker_url;
+    int ret = 0;
+    int index;
+    int i;
+    uint16_t mqtt_broker_port = rna_port;
+    ULONG start, actual_flags;
     fmi_product_info_t * effmi;
     app_config_t provisioned_config;
     user_credentials_t original_device;
-    original_device.user_id[0] = '\0';
-    original_device.password[0] = '\0';
-    memset(&provisioned_config, 0, sizeof(provisioned_config));
+#ifdef USE_TLS
+    NX_SECURE_TLS_SESSION tls_session;
+    NX_SECURE_X509_CERT ota_root_cert;
+#endif
+    ota_config_t ota_config = {
+                               .processing_callback = toggle_green_led,
+                               .net_config = {
+#ifdef USE_TLS
+                                              .p_tls_sesssion = &tls_session,
+                                              .p_trusted_cert = &ota_root_cert,
+#else
+                                              .p_tls_session = NULL,
+                                              .p_trusted_cert = NULL,
+#endif
+                                              .p_ip = &g_http_ip,
+                                              .p_ppool = &g_http_packet_pool,
+                                              .p_dns = &g_dns_client,
+                               },
+                               .file_config = {
+                                               .p_media = &g_qspi_media,
+                                               .filename = {0},
+                                               .save_path = "Put binary here"
+                               },
+                               .crypto_config = {
+                                                 .p_hash = &g_sce_hash_0,
+                                                 .p_crypto = &g_sce_0
+                               },
+
+    };
 #ifdef USE_M1DIAG
     const project_credentials_t diag_project = {
-#if 1
-        .proj_id="kxwuKiOTycI",
-        .apikey="2TXT7PJ4BGC4UA24XANNORBQGU2DIYTDG42DOMTDGQZDAMBQ"
+#ifdef DEV_DIAG
+                                                .proj_id="kxwuKiOTycI",
+                                                .apikey="2TXT7PJ4BGC4UA24XANNORBQGU2DIYTDG42DOMTDGQZDAMBQ"
 #else
-        .proj_id="Ohafs8Q31jU",
-        .apikey="VRWM4JXNCKZEHIDP4T7TQRZQGU4TSOJQGI4WMZBQGQ3DAMBQ"
+                                                .proj_id="Ohafs8Q31jU",
+                                                .apikey="VRWM4JXNCKZEHIDP4T7TQRZQGU4TSOJQGI4WMZBQGQ3DAMBQ"
 #endif
     };
     user_credentials_t original_diag_device;
+    user_credentials_t diag_registration = {
+#ifdef DEV_DIAG
+                                            .user_id="1tyKNEkeZpQ",
+#else
+                                            .user_id="f_acx06uqDA",
+#endif
+                                            .password="Medium-1!"
+    };
+
     original_diag_device.user_id[0] = '\0';
     original_diag_device.password[0] = '\0';
     app_config.diagnostics.user_id[0] = '\0';
     app_config.diagnostics.password[0] = '\0';
-    user_credentials_t diag_registration = {
-#if 0
-        .user_id="f_acx06uqDA",
-#else
-        .user_id="1tyKNEkeZpQ",
-        .password="Medium-1!"
 #endif
-    };
-#endif
-    const char * p_mqtt_broker_host = rna_broker_url;
-    uint16_t mqtt_broker_port = rna_port;
-    ULONG start, actual_flags;
-    char event[1536];
 
-
+    original_device.user_id[0] = '\0';
+    original_device.password[0] = '\0';
+    memset(&provisioned_config, 0, sizeof(provisioned_config));
     g_fmi.p_api->productInfoGet(&effmi);
-
     status = g_flash0.p_api->open(g_flash0.p_ctrl, g_flash0.p_cfg);
     if (status)
         goto err;
@@ -571,10 +621,6 @@ void net_thread_entry(void)
     for (unsigned int k = 0; k < sizeof(effmi->unique_id); k++)
         idlen += sprintf(&event[idlen], "%02X", effmi->unique_id[k]);
 
-#if 0  // enable, with UART on SCI driver instance, for MQTT debug logging
-    logger_init((void *) &g_uart0, 0);
-#endif
-
 #ifdef USE_M1DIAG
     m1_diag_initdata_t initdata;
     strcpy(initdata.email_address, "your@email.add");
@@ -587,12 +633,20 @@ void net_thread_entry(void)
             BUILD_MONTH_CH0, BUILD_MONTH_CH1,
             BUILD_DAY_CH0, BUILD_DAY_CH1,
             VERSION_MAJOR, VERSION_MINOR);
-#if 0
-    ret = m1_diag_start("mqtt.mediumone.com",
-                            61618,
-#else
+#ifdef DEV_DIAG
     ret = m1_diag_start("ladder.mediumone.com",
+#ifdef USE_TLS
+                            61614,
+#else
                             61613,
+#endif
+#else
+    ret = m1_diag_start("mqtt.mediumone.com",
+#ifdef USE_TLS
+                            61620,
+#else
+                            61619,
+#endif
 #endif
                             &diag_project,
                             &diag_registration,
@@ -636,7 +690,6 @@ void net_thread_entry(void)
         if (ret)
             goto err;
     }
-
 
     unsigned long mac_address[2];
     nx_ip_interface_info_get(&g_http_ip, 0, NULL, NULL, NULL, NULL, &mac_address[0], &mac_address[1]);
@@ -693,21 +746,20 @@ void net_thread_entry(void)
 
     while (1) {
         if (g_update_firmware) {
-            char filename[40];
             g_ioport.p_api->pinCfg(IOPORT_PORT_04_PIN_07, IOPORT_CFG_PORT_DIRECTION_INPUT | IOPORT_CFG_NMOS_ENABLE);
             // suspend system thread to prevent FX media concurrent interaction
             tx_thread_suspend(&system_thread);
-            NX_SECURE_TLS_SESSION tls_session;
-            NX_SECURE_X509_CERT ota_root_cert;
+#ifdef USE_TLS
+            nx_secure_x509_certificate_initialize(&ota_root_cert, (uint8_t *)M1_ROOT_CERT, sizeof(M1_ROOT_CERT), NULL, 0, NULL, 0, NX_SECURE_X509_KEY_TYPE_NONE);
             memset(&tls_session, 0, sizeof(tls_session));
-            nx_secure_x509_certificate_initialize(&ota_root_cert, (uint8_t *)uguu_root, sizeof(uguu_root), NULL, 0, NULL, 0, NX_SECURE_X509_KEY_TYPE_NONE);
             nx_secure_tls_session_create(&tls_session, &nx_crypto_tls_ciphers_synergys7, ota_crypto_mem, sizeof(ota_crypto_mem));
-            ret = update_firmware(g_update_url, g_update_hash, &g_qspi_media, &g_http_ip, &g_http_packet_pool, &g_dns_client, &g_sce_hash_0, &g_sce_0, filename, NULL, toggle_green_led, &tls_session, &ota_root_cert);
+#endif
+            ret = update_firmware(g_update_url, g_update_hash, &ota_config);
             if (!ret) {
                 remove("loaded.txt");
                 remove("update.txt");
                 FILE * config_file = fopen("update.txt", "w");
-                if (config_file && (fwrite(filename, strlen(filename) + 1, 1, config_file) == 1)) {
+                if (config_file && (fwrite(ota_config.file_config.filename, strlen(ota_config.file_config.filename) + 1, 1, config_file) == 1)) {
                     fclose(config_file);
 #ifdef USE_M1DIAG
                     M1_LOG(info, "OTA update downloaded", 0);
@@ -738,10 +790,9 @@ void net_thread_entry(void)
             // most likely means deadlock (i2c callback not called)
             SCB->AIRCR = 0x05FA0004;
         }
-        int index = 1;
         event[0] = '{';
         event[1] = '\0';
-        int i;
+        index = 1;
         for (i = 0; i < SENSORS; i++) {
             if (sensors[i]->count) {
                 index += sprintf(&event[index],

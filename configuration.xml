@@ -592,7 +592,7 @@
     <module id="module.el.nxd.packet_pool.1381846538">
       <property id="module.el.nx.packet_pool.name" value="g_http_packet_pool"/>
       <property id="module.el.nx.packet_pool.packet_size" value="1536"/>
-      <property id="module.el.nx.packet_pool.number_of_packets" value="65"/>
+      <property id="module.el.nx.packet_pool.number_of_packets" value="40"/>
       <property id="module.el.nx.packet_pool.init_function" value="packet_pool_init0"/>
       <property id="module.el.nx.packet_pool.init" value="module.el.nx.packet_pool.init.enable"/>
     </module>
