@@ -59,7 +59,6 @@
 
 #ifdef USE_M1DIAG
 volatile agg_t mic = { .name = "mic", .total = 0, .min = 0, .max = 0, .count = 0, .last_sent = 0, .value = 0, .threshold = 0, .absolute_threshold = 0, .last_sent_tick = 0 };
-volatile agg_t voice_fft = { .name = "voice_fft", .total = 0, .min = 0, .max = 0, .count = 0, .last_sent = 0, .value = 0, .threshold = 0, .absolute_threshold = 0, .last_sent_tick = 0 };
 #endif
 
 static volatile uint16_t sound_level = 0;
@@ -99,7 +98,6 @@ void adc_thread_entry(void)
     adc_instance_ctrl_t * p_ctrl = (adc_instance_ctrl_t *) g_adc0.p_ctrl;
 #ifndef USE_M1DIAG
     agg_t mic = { .name = "mic", .total = 0, .min = 0, .max = 0, .count = 0, .last_sent = 0, .value = 0, .threshold = 0, .absolute_threshold = 0, .last_sent_tick = 0 };
-    agg_t voice_fft = { .name = "voice_fft", .total = 0, .min = 0, .max = 0, .count = 0, .last_sent = 0, .value = 0, .threshold = 0, .absolute_threshold = 0, .last_sent_tick = 0 };
 #endif
 
     p_adc = (ADC_BASE_PTR) p_ctrl->p_reg;

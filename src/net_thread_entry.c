@@ -496,8 +496,7 @@ static int config_compare(app_config_t * config1, app_config_t * config2) {
 }
 
 /*
- * extracts credentials from m1config.txt, and optionally m1user.txt and
- * m1broker.txt.
+ * extracts credentials from m1config.txt, and optionally m1user.txt.
  *
  * if m1 diagnostics agent is enabled, checks dataflash for
  * auto-enrolled credentials. if credentials are present in dataflash, attempts
