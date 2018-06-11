@@ -24,6 +24,7 @@
  */
 #include <stdio.h>
 
+#include "S5D9/Include/S5D9.h"
 #define ARM_MATH_CM4
 #include "arm_math.h"
 #include "adc_thread.h"

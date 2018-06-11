@@ -27,6 +27,9 @@
 #include "r_flash_api.h"
 #include "nxd_dns.h"
 #include "nxd_dhcp_client.h"
+#include <tx_api.h>
+#include <nx_api.h>
+#include <nxd_mqtt_client.h>
 #include "fx_stdio.h"
 #include "led.h"
 #include "agg.h"
@@ -41,15 +44,19 @@
 
 
 //************ macros ************
-#define TLS_PACKET_BUFFER_MEM_SIZE (6 * 1024)
 #define MQTT_STACK_SIZE (8 * 1024)
 #define MAX_MQTT_MSGS 10
 #define MQTT_MSG_MEM_SIZE (MAX_MQTT_MSGS * NXD_MQTT_MAX_MESSAGE_LENGTH)
-#define CRYPTO_METADATA_MEM_SIZE 2104
+#define SENSORS 13
+#define USE_TLS
+
+#ifdef USE_TLS
+#define TLS_PACKET_BUFFER_MEM_SIZE (16 * 1024)
+#define CRYPTO_METADATA_MEM_SIZE (9 * 1024)
 #define MAX_CERTS 3
 #define CERT_SIZE (2 * 1024)
 #define CERT_MEM_SIZE (MAX_CERTS * CERT_SIZE)
-#define SENSORS 13
+#endif
 
 #ifdef USE_M1DIAG
 #define DEV_DIAG
@@ -71,8 +78,10 @@ extern TX_THREAD ms_thread;
 extern TX_THREAD system_thread;
 extern NX_IP g_http_ip;
 extern NX_DNS g_dns_client;
-extern const NX_SECURE_TLS_CRYPTO nx_crypto_tls_ciphers_synergys7;
 extern FX_MEDIA g_qspi_media;
+#ifdef USE_TLS
+extern const NX_SECURE_TLS_CRYPTO nx_crypto_tls_ciphers_synergys7;
+#endif
 
 #ifdef USE_M1DIAG
 /*
@@ -537,7 +546,7 @@ void net_thread_entry(void)
                                .processing_callback = toggle_green_led,
                                .net_config = {
 #ifdef USE_TLS
-                                              .p_tls_sesssion = &tls_session,
+                                              .p_tls_session = &tls_session,
                                               .p_trusted_cert = &ota_root_cert,
 #else
                                               .p_tls_session = NULL,
