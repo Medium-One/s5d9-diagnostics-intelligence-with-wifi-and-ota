@@ -286,21 +286,21 @@
     </module>
     <module id="module.el.ux_device.1694672977">
       <property id="module.el.ux_device.idVendor" value="0x045B"/>
-      <property id="module.el.ux_device.idProduct" value="0x0100"/>
-      <property id="module.el.ux_device.bcdDevice" value="0x0000"/>
-      <property id="module.el.ux_device.iManufacturer" value="0x00"/>
-      <property id="module.el.ux_device.iProduct" value="0x00"/>
-      <property id="module.el.ux_device.iSerialNumber" value="0x00"/>
-      <property id="module.el.ux_device.bDeviceClass" value="module.el.ux_device.bDeviceClass.msc"/>
-      <property id="module.el.ux_device.iConfiguration" value="0x00"/>
+      <property id="module.el.ux_device.idProduct" value="0x5302"/>
+      <property id="module.el.ux_device.bcdDevice" value="0x0100"/>
+      <property id="module.el.ux_device.iManufacturer" value="0x001"/>
+      <property id="module.el.ux_device.iProduct" value="0x002"/>
+      <property id="module.el.ux_device.iSerialNumber" value="0x003"/>
+      <property id="module.el.ux_device.bDeviceClass" value="module.el.ux_device.bDeviceClass.misc"/>
+      <property id="module.el.ux_device.iConfiguration" value="0x004"/>
       <property id="module.el.ux_device.wTotalLength" value="0x00"/>
       <property id="module.el.ux_device.bNumInterfaces" value="0x00"/>
-      <property id="module.el.ux_device.bmAttributes_bit6" value="module.el.ux_device.bmAttributes_bit6.enable"/>
+      <property id="module.el.ux_device.bmAttributes_bit6" value="module.el.ux_device.bmAttributes_bit6.disable"/>
       <property id="module.el.ux_device.bmAttributes_bit5" value="module.el.ux_device.bmAttributes_bit5.disable"/>
-      <property id="module.el.ux_device.bMaxPower" value="50"/>
+      <property id="module.el.ux_device.bMaxPower" value="250"/>
       <property id="module.el.ux_device.language_code" value="0x0409"/>
-      <property id="module.el.ux_device.string_descriptor.name" value="NULL"/>
-      <property id="module.el.ux_device.string_descriptor.index" value="0"/>
+      <property id="module.el.ux_device.string_descriptor.name" value="g_usb_string_framework"/>
+      <property id="module.el.ux_device.string_descriptor.index" value="5"/>
       <property id="module.el.ux_device.language_descriptor.name" value="NULL"/>
       <property id="module.el.ux_device.language_descriptor.number" value="0"/>
       <property id="module.el.ux_device.init_function" value="ux_device_init0"/>
@@ -315,9 +315,9 @@
     </module>
     <module id="module.el.ux.interface_descriptor_storage.1700291804">
       <property id="module.el.ux.interface_descriptor_storage.name" value="g_usb_interface_descriptor_storage_0"/>
-      <property id="module.el.ux.interface_descriptor_storage.bInterfaceNumber" value="0x00"/>
-      <property id="module.el.ux.interface_descriptor_storage.ep_bulk_out" value="module.el.ux.interface_descriptor_storage.ep_bulk_out.ep1"/>
-      <property id="module.el.ux.interface_descriptor_storage.ep_bulk_in" value="module.el.ux.interface_descriptor_storage.ep_bulk_in.ep2"/>
+      <property id="module.el.ux.interface_descriptor_storage.bInterfaceNumber" value="0x02"/>
+      <property id="module.el.ux.interface_descriptor_storage.ep_bulk_out" value="module.el.ux.interface_descriptor_storage.ep_bulk_out.ep4"/>
+      <property id="module.el.ux.interface_descriptor_storage.ep_bulk_in" value="module.el.ux.interface_descriptor_storage.ep_bulk_in.ep5"/>
     </module>
     <module id="module.framework.sf_el_ux_dcd_fs.1233913054">
       <property id="module.framework.sf_el_ux_dcd_fs.name" value="g_sf_el_ux_dcd_fs_0"/>

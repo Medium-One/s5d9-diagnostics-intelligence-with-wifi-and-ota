@@ -37,6 +37,42 @@ ssp_err_t R_IOPORT_PinRead (ioport_port_pin_t pin, ioport_level_t * p_pin_value)
 static UCHAR    g_qspi_mem[QSPI_SUB_SECTOR_SIZE] BSP_ALIGN_VARIABLE(8);
 FX_MEDIA g_qspi_media;
 char g_link_code[7];
+const UCHAR g_usb_string_framework[] =
+{
+    /* Index #1 (this example shows manufacturer information) */
+    (uint8_t) (0x0409),         /* Byte0 Language Code, US English */
+    (uint8_t) (0x0409 >> 8),    /* Byte1 Language Code */
+    0x01,                       /* Byte2 Index */
+    7,                          /* Byte3 Length */
+    'R', 'E', 'N', 'E', 'S', 'A', 'S',
+
+    /* Index #2 (this example shows product information) */
+    (uint8_t) (0x0409),         /* Byte0 Language Code, US English */
+    (uint8_t) (0x0409 >> 8),    /* Byte1 Language Code */
+    0x02,                       /* Byte2 Index */
+    19,                         /* Byte3 Length */
+    'I', 'O', 'T', ' ', 'F', 'A', 'S', 'T', ' ', 'P', 'R', 'O', 'T', 'O', ' ', 'S', '5', 'D', '9',
+
+    /* Index #3 (this example shows Device Serial Number information) */
+    (uint8_t) (0x0409),         /* Byte0 Language Code, US English */
+    (uint8_t) (0x0409 >> 8),    /* Byte1 Language Code */
+    0x03,                       /* Byte2 Index */
+    10,                         /* Byte3 Length */
+    'M', 'S', 'C', ' ', 'D', 'E', 'V', 'I', 'C', 'E',
+
+    /* Index #4 (this example shows Device Serial Number information) */
+    (uint8_t) (0x0409),         /* Byte0 Language Code, US English */
+    (uint8_t) (0x0409 >> 8),    /* Byte1 Language Code */
+    0x04,                       /* Byte2 Index */
+    4,                          /* Byte3 Length */
+    '0', '1', '0', '0',
+    /* Index #5 (this example shows Alternate configuration information) */
+    (uint8_t) (0x0409),         /* Byte0 Language Code, US English */
+    (uint8_t) (0x0409 >> 8),    /* Byte1 Language Code */
+    0x04,                       /* Byte2 Index */
+    14,                          /* Byte3 Length */
+    'S', 'e', 'r', 'i','a','l',' ','C','o','n','s','o','l','e'
+};
 
 
 #define APP_TRAP() do{set_led(0x7, 1);__BKPT();}while(0)
